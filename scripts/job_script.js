@@ -1,5 +1,5 @@
 const mysql = require("mysql2/promise");
-
+// main_job_script
 const args = process.argv.slice(2);
 if (args.length < 2) {
     console.error("Usage: node job_script.js <jobID> <candidateID>");
