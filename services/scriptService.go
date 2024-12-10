@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"job-application-automation/database"
@@ -18,6 +19,7 @@ func EnsureJobExists(jobID int64) error {
 	err := database.DB.First(&job, "job_id = ?", jobID).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
+
 			newJob := models.Job{
 				JobID:         jobID,
 				JobSite:       "default-site",
@@ -37,7 +39,6 @@ func EnsureJobExists(jobID int64) error {
 }
 
 func ExecuteScriptService(jobID int64, candidateID int, scriptPath string) error {
-
 	if err := EnsureJobExists(jobID); err != nil {
 		log.Printf("Error ensuring job exists for job_id %d: %v", jobID, err)
 		return err
@@ -56,35 +57,22 @@ func ExecuteScriptService(jobID int64, candidateID int, scriptPath string) error
 		Columns:   []clause.Column{{Name: "job_id"}, {Name: "candidate_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"status", "retry_count", "timestamp"}),
 	}).Create(&tracker).Error; err != nil {
-		log.Printf("Failed to create or update tracker entry with 'Pending' status for JobID %d, CandidateID %d: %v", jobID, candidateID, err)
-		return fmt.Errorf("failed to create or update tracker entry: %v", err)
+		log.Printf("Failed to initialize tracker: %v", err)
+		return err
 	}
 
-	log.Printf("Initialized tracker entry with 'Pending' status for JobID %d, CandidateID %d", jobID, candidateID)
+	log.Printf("Initialized tracker with 'Pending' status for JobID %d, CandidateID %d", jobID, candidateID)
 
-	cmd := exec.Command("node", scriptPath, fmt.Sprintf("%d", jobID), fmt.Sprintf("%d", candidateID))
+	absScriptPath, _ := filepath.Abs(scriptPath)
+	cmd := exec.Command("node", absScriptPath, fmt.Sprintf("%d", jobID), fmt.Sprintf("%d", candidateID))
 	output, err := cmd.CombinedOutput()
 
-	status := "Success"
-	errorMsg := ""
+	log.Printf("Script Output for JobID %d, CandidateID %d: %s", jobID, candidateID, string(output))
 	if err != nil {
-		status = "Failure"
-		errorMsg = fmt.Sprintf("Script failed: %v", err)
-		log.Printf("Script execution failed for JobID %d, CandidateID %d: %v", jobID, candidateID, err)
-	} else {
-		log.Printf("Script executed successfully for JobID %d, CandidateID %d", jobID, candidateID)
+		log.Printf("Script execution error for JobID %d, CandidateID %d: %v", jobID, candidateID, err)
+		return err
 	}
 
-	tracker.Status = status
-	tracker.Output = string(output)
-	tracker.Error = errorMsg
-	tracker.Timestamp = time.Now().Format("2006-01-02 15:04:05")
-
-	if updateErr := database.DB.Save(&tracker).Error; updateErr != nil {
-		log.Printf("Failed to update tracker entry with final status for JobID %d, CandidateID %d: %v", jobID, candidateID, updateErr)
-		return fmt.Errorf("failed to update tracker entry: %v", updateErr)
-	}
-
-	log.Printf("Updated tracker entry with status '%s' for JobID %d, CandidateID %d", status, jobID, candidateID)
+	log.Printf("Script executed successfully for JobID %d, CandidateID %d", jobID, candidateID)
 	return nil
 }
